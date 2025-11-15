@@ -71,8 +71,8 @@ def beautify_text(text: str) -> str:
         else:
             seen_urls.add(url)
 
-    # Clean up any resulting multiple spaces from URL removal
-    text = re.sub(r'\s+', ' ', text)
+    # Clean up any resulting multiple spaces from URL removal (preserve newlines)
+    text = re.sub(r'[ \t]+', ' ', text)
 
     # Final trim
     text = text.strip()

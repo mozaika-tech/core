@@ -23,66 +23,13 @@ from src.llm.extraction import ExtractionService
 from src.models.event import EventExtraction, SQSMessage
 
 
+@pytest.mark.functional
 class TestFullFlow:
-    """Test the complete flow from SQS message to API response."""
+    """Test the complete flow from SQS message to API response.
 
-    @pytest.fixture(scope="class")
-    def postgres_container(self):
-        """Create a PostgreSQL container with pgvector for the test class."""
-        container = PostgresContainer(
-            image="pgvector/pgvector:pg16",
-            user="test",
-            password="test",
-            dbname="test_db"
-        )
-        container.start()
-
-        # Wait for container to be ready
-        import time
-        time.sleep(3)
-
-        yield container
-        container.stop()
-
-    @pytest.fixture(scope="class")
-    def database_url(self, postgres_container):
-        """Get database URL from container."""
-        return postgres_container.get_connection_url().replace("psycopg2", "asyncpg")
-
-    @pytest_asyncio.fixture
-    async def db_pool(self, database_url):
-        """Create and initialize database pool with schema."""
-        pool = DatabasePool()
-        await pool.initialize(database_url)
-
-        # Load and execute schema
-        schema_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "schema.sql"
-        )
-
-        with open(schema_path, "r") as f:
-            schema_sql = f.read()
-
-        async with pool.pool.acquire() as conn:
-            # Execute schema creation
-            statements = [s.strip() for s in schema_sql.split(";") if s.strip()]
-            for statement in statements:
-                try:
-                    await conn.execute(statement)
-                except Exception as e:
-                    if "already exists" not in str(e):
-                        print(f"Error executing statement: {e}")
-
-        yield pool
-
-        # Cleanup
-        await pool.close()
-
-    @pytest_asyncio.fixture
-    async def event_repo(self, db_pool):
-        """Create event repository."""
-        return EventRepository(db_pool)
+    Uses testcontainers from conftest.py for database setup.
+    Tests will be skipped if Docker is not available.
+    """
 
     @pytest.fixture
     def test_client(self, database_url):

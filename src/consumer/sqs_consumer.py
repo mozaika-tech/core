@@ -23,6 +23,23 @@ from src.utils.text_processing import beautify_text
 logger = logging.getLogger(__name__)
 
 
+def parse_iso_datetime(date_string: str) -> datetime:
+    """Parse ISO datetime string with Z timezone support for Python 3.9."""
+    if not date_string:
+        return None
+
+    # Replace 'Z' with '+00:00' for Python 3.9 compatibility
+    if date_string.endswith('Z'):
+        date_string = date_string[:-1] + '+00:00'
+
+    try:
+        # Try parsing with timezone
+        return datetime.fromisoformat(date_string)
+    except ValueError:
+        # Fall back to parsing without timezone
+        return datetime.fromisoformat(date_string.replace('+00:00', ''))
+
+
 class SQSConsumer:
     """Consumer for processing SQS messages."""
 
@@ -108,7 +125,7 @@ class SQSConsumer:
                 run_id=body.get('run_id'),
                 external_id=body['external_id'],
                 text=body['text'],
-                posted_at=datetime.fromisoformat(body['posted_at']) if body.get('posted_at') else None,
+                posted_at=parse_iso_datetime(body.get('posted_at')) if body.get('posted_at') else None,
                 author=body.get('author'),
                 metadata=body.get('metadata', {})
             )

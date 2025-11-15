@@ -14,55 +14,13 @@ from src.database.connection import DatabasePool
 from src.database.events import EventRepository
 from src.models.event import EventExtraction
 
-
 @pytest.mark.functional
 class TestConsumerScenarios:
-    """Test various consumer processing scenarios."""
+    """Test various consumer processing scenarios.
 
-    @pytest.fixture(scope="class")
-    def postgres_container(self):
-        """Create PostgreSQL container."""
-        container = PostgresContainer(
-            image="pgvector/pgvector:pg16",
-            user="test",
-            password="test",
-            dbname="test_db"
-        )
-        container.start()
-
-        import time
-        time.sleep(3)
-
-        yield container
-        container.stop()
-
-    @pytest_asyncio.fixture
-    async def db_pool(self, postgres_container):
-        """Setup database with schema."""
-        database_url = postgres_container.get_connection_url().replace("psycopg2", "asyncpg")
-        pool = DatabasePool()
-        await pool.initialize(database_url)
-
-        # Load schema
-        schema_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "schema.sql"
-        )
-
-        with open(schema_path, "r") as f:
-            schema_sql = f.read()
-
-        async with pool.pool.acquire() as conn:
-            statements = [s.strip() for s in schema_sql.split(";") if s.strip()]
-            for statement in statements:
-                try:
-                    await conn.execute(statement)
-                except Exception as e:
-                    if "already exists" not in str(e):
-                        print(f"Schema setup error: {e}")
-
-        yield pool
-        await pool.close()
+    Uses testcontainers from conftest.py for database setup.
+    Tests will be skipped if Docker is not available.
+    """
 
     @pytest.mark.asyncio
     async def test_malformed_message_handling(self, db_pool):

@@ -1,27 +1,10 @@
-# Development and testing dependencies
+# Development dependencies
+# This file includes all production dependencies plus development tools
 
-# Include production dependencies
+# Include all production dependencies
 -r requirements.txt
 
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-pytest-mock==3.12.0
-testcontainers[postgresql]==3.7.1
-
-# Code quality
-black==23.12.1
-isort==5.13.2
-flake8==6.1.0
-mypy==1.8.0
-pylint==3.0.3
-
-# Type stubs
-types-python-dateutil==2.8.19.14
-types-requests==2.31.0.10
-
-# Development tools
+# Additional development tools
 ipython==8.18.1
 ipdb==0.13.13
 pre-commit==3.6.0
@@ -29,3 +12,8 @@ pre-commit==3.6.0
 # Documentation
 sphinx==7.2.6
 sphinx-rtd-theme==2.0.0
+
+# Note: Testing and linting tools are already in requirements.txt:
+# - pytest, pytest-asyncio, pytest-cov, pytest-mock, testcontainers
+# - black, isort, flake8, mypy
+# - types-python-dateutil

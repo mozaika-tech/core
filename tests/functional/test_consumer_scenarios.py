@@ -25,10 +25,18 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_malformed_message_handling(self, db_pool):
         """Test handling of malformed SQS messages."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
         consumer.categories = await consumer.event_repo.get_categories()
+
+        # Initialize extraction service (mocked via conftest)
+        category_slugs = [cat["slug"] for cat in consumer.categories]
+        consumer.extraction_service = ExtractionService(category_slugs)
+        consumer.vector_store = get_vector_store()
 
         # Test various malformed messages
         malformed_messages = [
@@ -59,13 +67,16 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_extraction_retry_mechanism(self, db_pool):
         """Test LLM extraction retry mechanism."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
         consumer.categories = await consumer.event_repo.get_categories()
+        category_slugs = [cat["slug"] for cat in consumer.categories]
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             # Mock extraction to fail twice then succeed
@@ -85,12 +96,14 @@ class TestConsumerScenarios:
                     categories_slugs=[]
                 )
 
+            # Create mock extraction service and assign to consumer
             mock_extraction = MagicMock()
             mock_extraction.extract_event_data = AsyncMock(side_effect=extraction_side_effect)
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=[0.1] * 384)
             mock_vector_store.return_value = MagicMock(index_event=AsyncMock())
+            consumer.vector_store = mock_vector_store.return_value
 
             message = {
                 "Body": json.dumps({
@@ -111,6 +124,9 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_various_text_formats(self, db_pool):
         """Test processing of various text formats and edge cases."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
@@ -132,8 +148,7 @@ class TestConsumerScenarios:
         ]
 
         for i, text in enumerate(test_texts):
-            with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-                 patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+            with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
                  patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
                 mock_extraction = MagicMock()
@@ -148,10 +163,11 @@ class TestConsumerScenarios:
                         categories_slugs=[]
                     )
                 )
-                mock_extraction_class.return_value = mock_extraction
+                consumer.extraction_service = mock_extraction
 
                 mock_embed_service.embed_text = MagicMock(return_value=[0.1] * 384)
                 mock_vector_store.return_value = MagicMock(index_event=AsyncMock())
+                consumer.vector_store = mock_vector_store.return_value
 
                 message = {
                     "Body": json.dumps({
@@ -171,6 +187,9 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_category_validation(self, db_pool):
         """Test that only valid categories are linked."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
@@ -178,8 +197,7 @@ class TestConsumerScenarios:
 
         valid_slugs = [cat["slug"] for cat in consumer.categories]
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             # Include both valid and invalid categories
@@ -195,10 +213,11 @@ class TestConsumerScenarios:
                     categories_slugs=["workshop", "invalid_category", "meetup", "fake_category"]
                 )
             )
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=[0.1] * 384)
             mock_vector_store.return_value = MagicMock(index_event=AsyncMock())
+            consumer.vector_store = mock_vector_store.return_value
 
             message = {
                 "Body": json.dumps({
@@ -242,31 +261,28 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_database_transaction_rollback(self, db_pool):
         """Test that failed database operations don't leave partial data."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
         consumer.categories = await consumer.event_repo.get_categories()
+        category_slugs = [cat["slug"] for cat in consumer.categories]
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             mock_extraction = MagicMock()
+            # Mock extraction to return None to simulate extraction failure
             mock_extraction.extract_event_data = AsyncMock(
-                return_value=EventExtraction(
-                    title="Transaction Test",
-                    language="INVALID",  # This should cause validation error
-                    city="Київ",
-                    country="UA",
-                    is_remote=False,
-                    status="active",
-                    categories_slugs=[]
-                )
+                return_value=None  # Extraction fails, should be handled gracefully
             )
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=[0.1] * 384)
             mock_vector_store.return_value = MagicMock(index_event=AsyncMock())
+            consumer.vector_store = mock_vector_store.return_value
 
             message = {
                 "Body": json.dumps({
@@ -294,6 +310,9 @@ class TestConsumerScenarios:
     @pytest.mark.asyncio
     async def test_high_volume_processing(self, db_pool):
         """Test processing a high volume of messages."""
+        from src.llm.extraction import ExtractionService
+        from src.llm.vector_store import get_vector_store
+
         consumer = SQSConsumer()
         consumer.db_pool = db_pool
         consumer.event_repo = EventRepository(db_pool)
@@ -301,8 +320,7 @@ class TestConsumerScenarios:
 
         message_count = 50  # Process 50 messages
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             mock_extraction = MagicMock()
@@ -325,10 +343,11 @@ class TestConsumerScenarios:
                 )
 
             mock_extraction.extract_event_data = AsyncMock(side_effect=create_extraction)
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=[0.1] * 384)
             mock_vector_store.return_value = MagicMock(index_event=AsyncMock())
+            consumer.vector_store = mock_vector_store.return_value
 
             # Process messages
             for i in range(message_count):

@@ -114,6 +114,25 @@ async def db_pool(database_url: str) -> AsyncGenerator[DatabasePool, None]:
                 except Exception as e:
                     print(f"Error executing statement: {e}")
 
+    # Clean up data from previous tests (keep schema, truncate tables)
+    async with pool.pool.acquire() as conn:
+        try:
+            await conn.execute("TRUNCATE TABLE event_categories, events, categories CASCADE")
+            # Re-insert default categories
+            await conn.execute("""
+                INSERT INTO categories (slug, name) VALUES
+                ('internship', 'Internship'),
+                ('workshop', 'Workshop'),
+                ('meetup', 'Meetup'),
+                ('conference', 'Conference'),
+                ('hackathon', 'Hackathon'),
+                ('competition', 'Competition')
+                ON CONFLICT (slug) DO NOTHING
+            """)
+        except Exception as e:
+            # First time setup, tables might not exist yet
+            pass
+
     yield pool
     await pool.close()
 

@@ -50,6 +50,12 @@ class EventRepository:
         fingerprint = self.generate_fingerprint(source_url, extraction.title, raw_text)
         discovered_at = datetime.utcnow()
 
+        # Convert embedding list to pgvector format string
+        if isinstance(embedding, list):
+            embedding_str = str(embedding)
+        else:
+            embedding_str = embedding
+
         query = """
             INSERT INTO events (
                 source_type, source_url, discovered_at, posted_at,
@@ -79,7 +85,7 @@ class EventRepository:
                 extraction.language, extraction.title, raw_text,
                 extraction.organizer, extraction.city, extraction.country,
                 extraction.is_remote, extraction.apply_url,
-                embedding, extraction.status, fingerprint
+                embedding_str, extraction.status, fingerprint
             )
 
             event_id = result["id"]

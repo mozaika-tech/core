@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from testcontainers.postgres import PostgresContainer
+import httpx
 
 from src.api.app import app
 from src.config import Settings
@@ -31,12 +32,39 @@ class TestFullFlow:
     Tests will be skipped if Docker is not available.
     """
 
-    @pytest.fixture
-    def test_client(self, database_url):
-        """Create test client with mocked database URL."""
-        with patch("src.config.settings.database_url", database_url):
-            with TestClient(app) as client:
+    @pytest_asyncio.fixture
+    async def test_client(self, db_pool, event_repo):
+        """Create async test client that shares the same event loop."""
+        # Override FastAPI dependencies to use our test database
+        from src.api.app import get_event_repository, get_extraction_service
+
+        async def override_event_repo():
+            return event_repo
+
+        async def override_extraction():
+            categories = await event_repo.get_categories()
+            category_slugs = [cat["slug"] for cat in categories]
+            return ExtractionService(category_slugs)
+
+        # Apply dependency overrides
+        app.dependency_overrides[get_event_repository] = override_event_repo
+        app.dependency_overrides[get_extraction_service] = override_extraction
+
+        # Patch get_db_pool for any direct calls
+        with patch("src.api.app.get_db_pool") as mock_get_db_pool:
+            async def mock_get_pool():
+                return db_pool
+            mock_get_db_pool.side_effect = mock_get_pool
+
+            # Use httpx.AsyncClient with ASGI transport (same event loop as test)
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test"
+            ) as client:
                 yield client
+
+        # Clean up dependency overrides
+        app.dependency_overrides.clear()
 
     @pytest.fixture
     def mock_llm_extraction(self):
@@ -79,14 +107,13 @@ class TestFullFlow:
         consumer.categories = await event_repo.get_categories()
 
         # Mock external services
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             # Setup extraction mock
             mock_extraction = MagicMock()
             mock_extraction.extract_event_data = AsyncMock(return_value=mock_llm_extraction)
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             # Setup embedding mock
             mock_embed_service.embed_text = MagicMock(return_value=mock_embedding)
@@ -95,6 +122,7 @@ class TestFullFlow:
             mock_vector = MagicMock()
             mock_vector.index_event = AsyncMock()
             mock_vector_store.return_value = mock_vector
+            consumer.vector_store = mock_vector
 
             # Create test message
             test_message = {
@@ -166,28 +194,25 @@ class TestFullFlow:
             assert "workshop" in category_slugs
             assert "meetup" in category_slugs
 
-        # Step 3: Test SQL search API
-        with patch("src.api.app.get_db_pool") as mock_get_db_pool:
-            mock_get_db_pool.return_value = db_pool
+        # Step 3: Test SQL search API (using async client)
+        # Search by city
+        response = await test_client.get("/search?city=Київ")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        assert any(hit["title"] == "AI Workshop in Kyiv" for hit in data["hits"])
 
-            # Search by city
-            response = test_client.get("/search?city=Київ")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["total"] >= 1
-            assert any(hit["title"] == "AI Workshop in Kyiv" for hit in data["hits"])
+        # Search by category
+        response = await test_client.get("/search?category=workshop")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
 
-            # Search by category
-            response = test_client.get("/search?category=workshop")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["total"] >= 1
-
-            # Full-text search
-            response = test_client.get("/search?q=AI+Machine+Learning")
-            assert response.status_code == 200
-            data = response.json()
-            # Note: Full-text search might not work without proper PostgreSQL text search setup
+        # Full-text search
+        response = await test_client.get("/search?q=AI+Machine+Learning")
+        assert response.status_code == 200
+        data = response.json()
+        # Note: Full-text search might not work without proper PostgreSQL text search setup
 
         # Step 4: Test AI search API (with mocked vector search)
         with patch("src.api.app.get_db_pool") as mock_get_db_pool, \
@@ -234,7 +259,7 @@ class TestFullFlow:
                 "top_k": 5
             }
 
-            response = test_client.post("/ai/search", json=request_body)
+            response = await test_client.post("/ai/search", json=request_body)
             assert response.status_code == 200
             data = response.json()
             assert len(data["hits"]) == 1
@@ -256,20 +281,20 @@ class TestFullFlow:
         consumer.event_repo = event_repo
         consumer.categories = await event_repo.get_categories()
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             # Setup mocks
             mock_extraction = MagicMock()
             mock_extraction.extract_event_data = AsyncMock(return_value=mock_llm_extraction)
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=mock_embedding)
 
             mock_vector = MagicMock()
             mock_vector.index_event = AsyncMock()
             mock_vector_store.return_value = mock_vector
+            consumer.vector_store = mock_vector
 
             # Same message content but different external_id
             base_message = {
@@ -371,29 +396,33 @@ class TestFullFlow:
             )
             await event_repo.link_categories(event_id, event_data["extraction"].categories_slugs)
 
+        # Ensure all connections are released before API calls
+        import asyncio
+        await asyncio.sleep(0.1)
+
         with patch("src.api.app.get_db_pool") as mock_get_db_pool:
             mock_get_db_pool.return_value = db_pool
 
             # Test language filter
-            response = test_client.get("/search?language=en")
+            response = await test_client.get("/search?language=en")
             assert response.status_code == 200
             data = response.json()
             assert all(hit["language"] == "en" for hit in data["hits"])
 
             # Test is_remote filter
-            response = test_client.get("/search?is_remote=true")
+            response = await test_client.get("/search?is_remote=true")
             assert response.status_code == 200
             data = response.json()
             assert all(hit["is_remote"] is True for hit in data["hits"])
 
             # Test date range filter
-            response = test_client.get(
+            response = await test_client.get(
                 "/search?occurs_from=2025-12-01T00:00:00Z&occurs_to=2025-12-05T00:00:00Z"
             )
             assert response.status_code == 200
 
             # Test multiple category filter
-            response = test_client.get("/search?category=hackathon&category=competition")
+            response = await test_client.get("/search?category=hackathon&category=competition")
             assert response.status_code == 200
             data = response.json()
             for hit in data["hits"]:
@@ -401,7 +430,7 @@ class TestFullFlow:
                 assert "hackathon" in categories or "competition" in categories
 
             # Test sorting
-            response = test_client.get("/search?sort_by=posted_at&order=asc")
+            response = await test_client.get("/search?sort_by=posted_at&order=asc")
             assert response.status_code == 200
             data = response.json()
             if len(data["hits"]) > 1:
@@ -422,8 +451,7 @@ class TestFullFlow:
         consumer.event_repo = event_repo
         consumer.categories = await event_repo.get_categories()
 
-        with patch("src.consumer.sqs_consumer.ExtractionService") as mock_extraction_class, \
-             patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
+        with patch("src.consumer.sqs_consumer.embedding_service") as mock_embed_service, \
              patch("src.consumer.sqs_consumer.get_vector_store") as mock_vector_store:
 
             # Setup extraction to fail first, then succeed
@@ -447,10 +475,13 @@ class TestFullFlow:
                     )
                 ]
             )
-            mock_extraction_class.return_value = mock_extraction
+            consumer.extraction_service = mock_extraction
 
             mock_embed_service.embed_text = MagicMock(return_value=mock_embedding)
-            mock_vector_store.return_value = MagicMock()
+            mock_vector = MagicMock()
+            mock_vector.index_event = AsyncMock()
+            mock_vector_store.return_value = mock_vector
+            consumer.vector_store = mock_vector
 
             # Process message that fails extraction
             fail_message = {

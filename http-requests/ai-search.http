@@ -1,0 +1,98 @@
+### AI Search - Basic Natural Language Query (Ukrainian)
+# Simple semantic search with natural language query
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "стажування в IT компанії у Києві",
+  "top_k": 12
+}
+
+###
+
+### AI Search - With User Profile
+# Personalized search with user profile for better relevance scoring
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "стажування у Києві в грудні для студента",
+  "top_k": 12,
+  "profile_inline": {
+    "city": "Київ",
+    "languages": ["uk", "en"],
+    "preferred_categories": ["internship", "workshop"],
+    "remote_preference": "any",
+    "about": "студент комп'ютерних наук, шукаю стажування в IT"
+  }
+}
+
+###
+
+### AI Search - English Query with Profile
+# AI search in English with professional profile
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "data science workshops in Kyiv this December",
+  "top_k": 10,
+  "profile_inline": {
+    "city": "Київ",
+    "languages": ["en", "uk"],
+    "preferred_categories": ["workshop", "conference"],
+    "remote_preference": "onsite",
+    "about": "data scientist looking for professional development opportunities"
+  }
+}
+
+###
+
+### AI Search - Remote Opportunities
+# Search for remote work with specific preferences
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "remote work opportunities in software development",
+  "top_k": 15,
+  "profile_inline": {
+    "languages": ["uk", "en"],
+    "preferred_categories": ["internship", "job"],
+    "remote_preference": "remote_only",
+    "about": "full-stack developer, prefer remote work, interested in backend and frontend"
+  }
+}
+
+###
+
+### AI Search - Conference and Networking
+# Find networking events and conferences
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "tech conferences and networking events",
+  "top_k": 10,
+  "profile_inline": {
+    "city": "Київ",
+    "languages": ["uk", "en"],
+    "preferred_categories": ["conference", "networking"],
+    "remote_preference": "any",
+    "about": "software engineer interested in professional networking and industry events"
+  }
+}
+
+###
+
+### AI Search - Short Query Without Profile
+# Minimal query for quick semantic search
+POST {{base_url}}/ai/search
+Content-Type: application/json
+
+{
+  "query": "AI workshops",
+  "top_k": 5
+}
+
+###

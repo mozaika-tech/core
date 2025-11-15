@@ -1,0 +1,11 @@
+### Health Check
+# Check if the API server is running and healthy
+GET {{base_url}}/health
+
+###
+
+### Get Categories
+# Retrieve all available event categories
+GET {{base_url}}/categories
+
+###

@@ -1,0 +1,35 @@
+### SQL Search - Basic Text Query
+# Simple full-text search with pagination
+GET {{base_url}}/search?q=workshop&page=1&size=20
+
+###
+
+### SQL Search - With Location and Category Filters
+# Comprehensive filtering by city, country, language, categories
+GET {{base_url}}/search?q=internship&city=Київ&country=UA&language=uk&is_remote=false&category=internship&category=workshop&sort_by=deadline_at&order=asc&page=1&size=20
+
+###
+
+### SQL Search - Date Range Filters
+# Filter by posted dates, event occurrence dates, and deadlines
+GET {{base_url}}/search?posted_from=2025-11-01&posted_to=2025-12-31&occurs_from=2025-12-01&occurs_to=2025-12-31&deadline_after=2025-11-15&page=1&size=20
+
+###
+
+### SQL Search - Remote Events Only
+# Filter for remote events with sorting
+GET {{base_url}}/search?q=remote&is_remote=true&sort_by=posted_at&order=desc&page=1&size=20
+
+###
+
+### SQL Search - By Category and City
+# Find workshops in Kyiv sorted by event start date
+GET {{base_url}}/search?city=Київ&category=workshop&sort_by=occurs_from&order=asc&page=1&size=10
+
+###
+
+### SQL Search - Upcoming Deadlines
+# Find events with deadlines in the near future
+GET {{base_url}}/search?deadline_after=2025-11-15&deadline_before=2025-12-15&sort_by=deadline_at&order=asc&page=1&size=20
+
+###

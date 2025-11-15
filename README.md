@@ -2,55 +2,116 @@
 
 Production-ready Python service for processing scraped events using LlamaIndex and PostgreSQL with pgvector extension. The service consumes messages from SQS, extracts metadata using configurable LLMs, and provides both SQL-based and AI-powered semantic search APIs.
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Mozaika Core Service                        │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────┐              ┌──────────────────┐           │
+│  │  SQS Consumer    │              │   FastAPI Server │           │
+│  │  (Async Process) │              │   (REST API)     │           │
+│  └────────┬─────────┘              └────────┬─────────┘           │
+│           │                                  │                      │
+│           │  ┌──────────────────────────────┤                      │
+│           │  │                               │                      │
+│           ▼  ▼                               ▼                      │
+│  ┌────────────────────────────────────────────────────┐            │
+│  │           Shared Components Layer                  │            │
+│  ├────────────────────────────────────────────────────┤            │
+│  │  • PostgreSQL Pool (asyncpg)                       │            │
+│  │  • LlamaIndex (embeddings, vector store, LLM)      │            │
+│  │  • Event Repository (DB operations)                │            │
+│  │  • Extraction Service (LLM integration)            │            │
+│  └────────────────────────────────────────────────────┘            │
+│                           │                                         │
+└───────────────────────────┼─────────────────────────────────────────┘
+                            │
+            ┌───────────────┴───────────────┐
+            │                               │
+            ▼                               ▼
+    ┌──────────────┐              ┌─────────────────┐
+    │  PostgreSQL  │              │  LLM Providers  │
+    │  + pgvector  │              │  (Anthropic,    │
+    │              │              │   Gemini, OpenAI)│
+    └──────────────┘              └─────────────────┘
+```
+
+### Data Flow
+
+**SQS Consumer Process:**
+```
+AWS SQS → Poll Messages → Extract Text → LLM Processing (extract metadata)
+    → Generate Embeddings → Store in PostgreSQL → Index in Vector Store
+    → Delete from SQS
+```
+
+**API Server - SQL Search (GET /search):**
+```
+HTTP Request → Parse Query Parameters → Build SQL Query
+    → Execute in PostgreSQL → Return Results
+```
+
+**API Server - AI Search (POST /ai/search):**
+```
+HTTP Request → Parse Natural Language Query → LLM (extract filters from query)
+    → Apply Filters (city, country, language, categories, dates, remote)
+    → Generate Query Embedding → Vector Search on Filtered Subset
+    → Calculate Relevance (with user profile) → LLM (generate answer)
+    → Return Results + AI Answer
+```
+
 ## Features
 
 - **SQS Consumer**: Asynchronous message processing from AWS SQS
-- **LLM Integration**: Configurable support for Anthropic, Google Gemini, and OpenAI
+- **LLM Integration**: Configurable support for Anthropic Claude, Google Gemini, and OpenAI
 - **Semantic Search**: Vector similarity search using pgvector and LlamaIndex
 - **Dual Search APIs**: Traditional SQL filtering and AI-powered semantic search
-- **Multilingual Support**: Embeddings using multilingual-e5-small model
+- **Multilingual Support**: Embeddings using multilingual-e5-small model (384 dimensions)
 - **Production Ready**: Connection pooling, graceful shutdown, comprehensive error handling
-
-## Architecture
-
-The application runs two concurrent processes:
-
-1. **SQS Consumer**: Polls SQS → Extract metadata → Generate embeddings → Store in PostgreSQL → Index in vector store
-2. **FastAPI Server**: Provides REST APIs for searching events
-
-Both processes share:
-- PostgreSQL connection pool (asyncpg)
-- LlamaIndex components (embeddings, vector store, LLM)
+- **Deduplication**: Fingerprint-based duplicate detection
+- **Comprehensive Testing**: Full test coverage with testcontainers and mocking
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.13+ (compatible with 3.9+)
 - PostgreSQL 16+ with pgvector extension
-- AWS SQS queue (or LocalStack for testing)
+- AWS SQS queue
 - API key for chosen LLM provider (Anthropic/Gemini/OpenAI)
+- Docker (optional, for functional tests)
 
 ## Installation
 
-### 1. Clone the repository
+### 1. Create virtual environment
 
 ```bash
-cd /Users/taras.tarasiuk/Projects/mozaika/core
-```
-
-### 2. Create virtual environment
-
-```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-### 3. Install dependencies
+### 2. Install dependencies
+
+We use the standard Python practice of separate requirements files:
+
+- **`requirements.txt`** - All production dependencies (includes testing/linting for CI/CD)
+- **`requirements-dev.txt`** - Adds development-only tools (5 extra packages)
 
 ```bash
+# For production/testing/CI
 pip install -r requirements.txt
+
+# For local development (adds interactive tools)
+pip install -r requirements-dev.txt
 ```
 
-### 4. Set up PostgreSQL with pgvector
+**Why separate files?** (Standard Python practice)
+- **Production lean**: Deployments only install what's needed
+- **Development convenience**: Adds ipython, ipdb, pre-commit, sphinx (docs)
+- **Single source of truth**: Same pinned versions for core dependencies
+- **Common pattern**: Used by most Python projects
+
+### 3. Set up PostgreSQL with pgvector
 
 Using Docker:
 ```bash
@@ -63,13 +124,13 @@ docker run -d \
   pgvector/pgvector:pg16
 ```
 
-### 5. Initialize database schema
+### 4. Initialize database schema
 
 ```bash
 psql -h localhost -U mozaika -d mozaika_db -f schema.sql
 ```
 
-### 6. Configure environment
+### 5. Configure environment
 
 Copy `.env.example` to `.env` and update with your settings:
 
@@ -81,7 +142,6 @@ Edit `.env` with your configuration:
 - Database connection URL
 - SQS queue URL and AWS credentials
 - LLM provider and API key
-- Other settings as needed
 
 ## Configuration
 
@@ -92,8 +152,8 @@ Edit `.env` with your configuration:
 | `DATABASE_URL` | PostgreSQL connection URL | Required |
 | `SQS_QUEUE_URL` | AWS SQS queue URL | Required |
 | `AWS_REGION` | AWS region | us-east-1 |
-| `AWS_ACCESS_KEY_ID` | AWS access key | Optional |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key | Optional |
+| `AWS_ACCESS_KEY_ID` | AWS access key | Optional (use IAM roles) |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key | Optional (use IAM roles) |
 | `LLM_PROVIDER` | LLM provider (anthropic/gemini/openai) | anthropic |
 | `ANTHROPIC_API_KEY` | Anthropic API key | Required if provider=anthropic |
 | `GEMINI_API_KEY` | Google Gemini API key | Required if provider=gemini |
@@ -106,7 +166,7 @@ Edit `.env` with your configuration:
 
 ### LLM Provider Configuration
 
-The service supports multiple LLM providers. Set `LLM_PROVIDER` and provide the corresponding API key:
+Set `LLM_PROVIDER` and provide the corresponding API key:
 
 ```bash
 # For Anthropic Claude
@@ -146,6 +206,18 @@ python -c "import asyncio; from src.consumer.sqs_consumer import run_consumer; a
 
 ## API Documentation
 
+### HTTP Request Files
+
+Ready-to-use HTTP request files in `http-requests/` folder for JetBrains IDEs (IntelliJ IDEA, PyCharm, WebStorm).
+
+Files included:
+- **`health-and-categories.http`** - Basic endpoints
+- **`sql-search.http`** - SQL search with filters and date ranges
+- **`ai-search.http`** - AI semantic search (Ukrainian/English)
+- **`http-client.env.json`** - Environment configuration (dev/staging/production)
+
+See [http-requests/README.md](http-requests/README.md) for usage instructions.
+
 ### Interactive API Documentation
 
 Once the server is running, visit:
@@ -161,15 +233,15 @@ Health check endpoint.
 SQL-based event search with filters.
 
 Query parameters:
-- `q`: Full-text search
-- `city`: Filter by city
-- `country`: ISO-3166-1 alpha-2 country code
-- `language`: ISO-639-1 language code
-- `is_remote`: Boolean for remote/onsite
+- `q`: Full-text search query
+- `city`: Filter by city name
+- `country`: ISO-3166-1 alpha-2 country code (e.g., UA, PL, US)
+- `language`: ISO-639-1 language code (e.g., uk, en, pl)
+- `is_remote`: Boolean for remote/onsite events
 - `category[]`: Category slugs (multiple allowed)
-- `posted_from/posted_to`: Posted date range
-- `occurs_from/occurs_to`: Event date range
-- `deadline_before/deadline_after`: Deadline filters
+- `posted_from/posted_to`: Posted date range (ISO format)
+- `occurs_from/occurs_to`: Event date range (ISO format)
+- `deadline_before/deadline_after`: Deadline filters (ISO format)
 - `sort_by`: posted_at | deadline_at | occurs_from
 - `order`: asc | desc
 - `page`: Page number (default: 1)
@@ -231,7 +303,7 @@ The service expects messages from the telegram-scrapper in this format:
 2. **Text Processing**: Beautify and normalize text
 3. **LLM Extraction**: Extract structured data (title, location, dates, categories)
 4. **Embedding Generation**: Create 384-dimensional vector using multilingual-e5-small
-5. **Database Storage**: Upsert event with deduplication
+5. **Database Storage**: Upsert event with deduplication (fingerprint-based)
 6. **Category Linking**: Associate event with categories
 7. **Vector Indexing**: Index in LlamaIndex for semantic search
 8. **Message Acknowledgment**: Delete from SQS on success
@@ -241,136 +313,43 @@ The service expects messages from the telegram-scrapper in this format:
 ### Run Tests
 
 ```bash
-# Run all tests
+# Run all tests (unit + functional if Docker available)
 pytest
+
+# Run only unit tests (no Docker needed)
+pytest tests/unit tests/test_*.py
 
 # Run with coverage
 pytest --cov=src --cov-report=html
 
 # Run specific test file
-pytest tests/test_sqs_consumer.py
+pytest tests/test_sqs_consumer.py -v
 
-# Run with verbose output
-pytest -v
+# Using test runner script
+./run_tests.sh quick      # Unit tests only
+./run_tests.sh coverage   # With coverage report
 ```
 
 ### Test Coverage
 
-The test suite includes:
-- SQS consumer message processing
-- API endpoint functionality
-- Database operations
-- LLM extraction mocking
-- Vector store operations
+Test suite includes:
+- **Unit tests** - No Docker required, all external services mocked
+- **Functional tests** - Require Docker, use testcontainers for real PostgreSQL
+- **SQS consumer** message processing and error handling
+- **API endpoints** with comprehensive mocking
+- **Database operations** with real database via testcontainers
+- **LLM extraction** fully mocked (no API calls)
+- **Vector store** operations
 
-## Monitoring
-
-### Metrics
-
-The SQS consumer tracks:
-- `processed_count`: Successfully processed messages
-- `error_count`: Failed messages
-- `duplicate_count`: Duplicate events detected
-- `avg_processing_time_ms`: Average processing time
-
-### Logs
-
-Logs are output to stdout with configurable level:
-```
-2025-11-15 10:30:45 - src.consumer.sqs_consumer - INFO - Processed message test_123 in 450ms
-```
+See [TESTING.md](TESTING.md) for detailed testing guide.
 
 ## Database Schema
 
-The service uses a strict schema with three main tables:
-- `events`: Main event data with vector embeddings
-- `categories`: Controlled vocabulary of event categories
-- `event_categories`: Junction table for many-to-many relationship
-
-See `schema.sql` for complete schema definition.
-
-## Deployment
-
-### Docker
-
-Create a Dockerfile:
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "main.py"]
-```
-
-Build and run:
-```bash
-docker build -t mozaika-core .
-docker run --env-file .env -p 8000:8000 mozaika-core
-```
-
-### AWS ECS/Fargate
-
-1. Build and push Docker image to ECR
-2. Create ECS task definition with environment variables
-3. Configure service with desired task count
-4. Set up Application Load Balancer for API endpoints
-
-### Kubernetes
-
-Create deployment and service manifests with:
-- ConfigMap for non-sensitive configuration
-- Secrets for API keys
-- Horizontal Pod Autoscaler for scaling
-- Ingress for API exposure
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Database connection errors**
-   - Verify PostgreSQL is running and accessible
-   - Check DATABASE_URL format
-   - Ensure pgvector extension is installed
-
-2. **SQS connection errors**
-   - Verify AWS credentials
-   - Check SQS queue URL
-   - Ensure queue exists and has proper permissions
-
-3. **LLM API errors**
-   - Verify API key is correct
-   - Check rate limits
-   - Ensure selected provider matches API key
-
-4. **Embedding model download**
-   - First run downloads the model (~150MB)
-   - Ensure sufficient disk space
-   - Check internet connectivity
-
-## Performance Optimization
-
-1. **Database**: Adjust connection pool size based on load
-2. **SQS**: Tune batch size and visibility timeout
-3. **Embeddings**: Use GPU if available for faster processing
-4. **Caching**: Consider Redis for frequently accessed data
-
-## Security
-
-- Store sensitive credentials in environment variables
-- Use IAM roles for AWS access in production
-- Enable HTTPS for API endpoints
-- Implement rate limiting for public APIs
-- Regular security updates for dependencies
+See `schema.sql` for the complete database schema with:
+- Events table with vector embeddings (pgvector)
+- Categories and event-category relationships
+- Full-text and vector search indexes
 
 ## License
 
 [Your License Here]
-
-## Support
-
-For issues or questions, please open an issue in the repository.

@@ -7,6 +7,7 @@ from llama_index.core.llms import LLM
 from llama_index.llms.anthropic import Anthropic
 from llama_index.llms.gemini import Gemini
 from llama_index.llms.openai import OpenAI
+from llama_index.llms.deepseek import DeepSeek
 
 from src.config import settings
 
@@ -54,7 +55,7 @@ class LLMFactory:
                 raise ValueError("GEMINI_API_KEY is required for Gemini provider")
             logger.info("Creating Gemini LLM instance")
             return Gemini(
-                model="gemini-1.5-pro",
+                model="gemini-2.0-flash-exp",
                 api_key=api_key,
                 temperature=0.1
             )
@@ -68,6 +69,18 @@ class LLMFactory:
                 model="gpt-4o",
                 api_key=api_key,
                 temperature=0.1
+            )
+
+        elif provider == "deepseek":
+            api_key = api_key or settings.deepseek_api_key
+            if not api_key:
+                raise ValueError("DEEPSEEK_API_KEY is required for DeepSeek provider")
+            logger.info("Creating DeepSeek LLM instance")
+            return DeepSeek(
+                model="deepseek-chat",
+                api_key=api_key,
+                temperature=0.1,
+                max_tokens=2048
             )
 
         else:

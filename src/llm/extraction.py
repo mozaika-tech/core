@@ -100,7 +100,12 @@ class ExtractionService:
 
         Returns:
             EventExtraction object or None if extraction fails
+
+        Raises:
+            Exception: Re-raises rate limit errors to allow caller to handle them
         """
+        import asyncio
+
         prompt = self.EXTRACTION_PROMPT.format(
             categories_list=self.categories_list,
             event_text=raw_text
@@ -136,14 +141,34 @@ class ExtractionService:
 
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse JSON response (attempt {attempt + 1}): {e}")
-                if attempt == max_retries - 1:
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 2^attempt seconds
+                    await asyncio.sleep(2 ** attempt)
+                else:
                     logger.error(f"Failed to extract event data after {max_retries} attempts")
                     return None
 
             except Exception as e:
-                logger.error(f"Error during extraction (attempt {attempt + 1}): {e}")
-                if attempt == max_retries - 1:
-                    return None
+                error_msg = str(e)
+
+                # Check if it's a rate limit error (429 or quota exceeded)
+                if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                    logger.warning(f"Rate limit hit (attempt {attempt + 1}): {e}")
+                    if attempt < max_retries - 1:
+                        # For rate limits, use longer backoff
+                        backoff = min(30, 5 * (2 ** attempt))  # Cap at 30 seconds
+                        logger.info(f"Waiting {backoff}s before retry due to rate limit")
+                        await asyncio.sleep(backoff)
+                    else:
+                        # Re-raise rate limit errors so consumer can decide whether to delete message
+                        logger.error("Rate limit exceeded after all retries")
+                        raise
+                else:
+                    logger.error(f"Error during extraction (attempt {attempt + 1}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        return None
 
         return None
 

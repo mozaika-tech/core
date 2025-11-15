@@ -140,11 +140,23 @@ class SQSConsumer:
             beautified_text = beautify_text(sqs_msg.text)
 
             # Step 2: Extract structured data using LLM
-            extraction = await self.extraction_service.extract_event_data(beautified_text)
+            try:
+                extraction = await self.extraction_service.extract_event_data(beautified_text)
+            except Exception as e:
+                error_msg = str(e)
+                # Check if it's a rate limit error
+                if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                    logger.warning(f"Rate limit error for message {sqs_msg.external_id}, will retry later: {e}")
+                    self.metrics["error_count"] += 1
+                    return False  # Don't delete - let SQS retry after visibility timeout
+                else:
+                    # Other errors - re-raise to be caught by outer try-except
+                    raise
+
             if not extraction:
                 logger.error(f"Failed to extract data for message {sqs_msg.external_id}")
                 self.metrics["error_count"] += 1
-                return True  # Delete message anyway to avoid reprocessing
+                return True  # Delete message to avoid reprocessing malformed data
 
             # Step 3: Generate embedding
             embed_text = f"{extraction.title}\n\n{beautified_text}"
@@ -225,12 +237,19 @@ class SQSConsumer:
                 if messages:
                     logger.info(f"Received {len(messages)} messages from SQS")
 
-                    # Process messages concurrently
-                    tasks = []
-                    for message in messages:
-                        tasks.append(self.process_message(message))
+                    # Process messages sequentially with rate limiting to avoid API quota issues
+                    results = []
+                    for i, message in enumerate(messages):
+                        try:
+                            result = await self.process_message(message)
+                            results.append(result)
+                        except Exception as e:
+                            logger.error(f"Exception processing message: {e}")
+                            results.append(e)
 
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Add delay between messages to avoid rate limits (except after last message)
+                        if i < len(messages) - 1:
+                            await asyncio.sleep(1)  # 1 second delay between messages
 
                     # Delete successfully processed messages
                     entries_to_delete = []

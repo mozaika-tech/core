@@ -19,10 +19,11 @@ class Settings(BaseModel):
     aws_endpoint_url: Optional[str] = None  # For LocalStack testing
 
     # LLM Configuration
-    llm_provider: str = "anthropic"  # anthropic | gemini | openai
+    llm_provider: str = "anthropic"  # anthropic | gemini | openai | deepseek
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
 
     # Embedding
     embedding_model: str = "intfloat/multilingual-e5-small"
@@ -44,7 +45,7 @@ class Settings(BaseModel):
     @validator("llm_provider")
     def validate_llm_provider(cls, v):
         """Validate LLM provider is supported."""
-        valid_providers = {"anthropic", "gemini", "openai"}
+        valid_providers = {"anthropic", "gemini", "openai", "deepseek"}
         if v not in valid_providers:
             raise ValueError(f"LLM provider must be one of: {valid_providers}")
         return v
@@ -70,6 +71,13 @@ class Settings(BaseModel):
             raise ValueError("OPENAI_API_KEY is required when using openai provider")
         return v
 
+    @validator("deepseek_api_key")
+    def validate_deepseek_key(cls, v, values):
+        """Ensure DeepSeek API key is provided when using DeepSeek provider."""
+        if values.get("llm_provider") == "deepseek" and not v:
+            raise ValueError("DEEPSEEK_API_KEY is required when using deepseek provider")
+        return v
+
     class Config:
         env_file = ".env"
         case_sensitive = False
@@ -92,6 +100,7 @@ def get_settings() -> Settings:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
         gemini_api_key=os.getenv("GEMINI_API_KEY"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8000")),

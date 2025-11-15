@@ -2,10 +2,10 @@
 
 import os
 from typing import Optional
-from pydantic import BaseSettings, validator
+from pydantic import BaseModel, Field, validator
 
 
-class Settings(BaseSettings):
+class Settings(BaseModel):
     """Application settings loaded from environment variables."""
 
     # Database
@@ -49,20 +49,25 @@ class Settings(BaseSettings):
             raise ValueError(f"LLM provider must be one of: {valid_providers}")
         return v
 
-    @validator("anthropic_api_key", "gemini_api_key", "openai_api_key")
-    def validate_api_keys(cls, v, values):
-        """Ensure the selected LLM provider has an API key."""
-        if "llm_provider" in values:
-            provider = values["llm_provider"]
-            if provider == "anthropic" and values.get("anthropic_api_key") is None:
-                if v is None and cls.__fields__.get("anthropic_api_key"):
-                    raise ValueError("ANTHROPIC_API_KEY is required when using anthropic provider")
-            elif provider == "gemini" and values.get("gemini_api_key") is None:
-                if v is None and cls.__fields__.get("gemini_api_key"):
-                    raise ValueError("GEMINI_API_KEY is required when using gemini provider")
-            elif provider == "openai" and values.get("openai_api_key") is None:
-                if v is None and cls.__fields__.get("openai_api_key"):
-                    raise ValueError("OPENAI_API_KEY is required when using openai provider")
+    @validator("anthropic_api_key")
+    def validate_anthropic_key(cls, v, values):
+        """Ensure Anthropic API key is provided when using Anthropic provider."""
+        if values.get("llm_provider") == "anthropic" and not v:
+            raise ValueError("ANTHROPIC_API_KEY is required when using anthropic provider")
+        return v
+
+    @validator("gemini_api_key")
+    def validate_gemini_key(cls, v, values):
+        """Ensure Gemini API key is provided when using Gemini provider."""
+        if values.get("llm_provider") == "gemini" and not v:
+            raise ValueError("GEMINI_API_KEY is required when using gemini provider")
+        return v
+
+    @validator("openai_api_key")
+    def validate_openai_key(cls, v, values):
+        """Ensure OpenAI API key is provided when using OpenAI provider."""
+        if values.get("llm_provider") == "openai" and not v:
+            raise ValueError("OPENAI_API_KEY is required when using openai provider")
         return v
 
     class Config:
@@ -72,7 +77,31 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     """Get application settings singleton."""
-    return Settings()
+    # Load from environment variables
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    return Settings(
+        database_url=os.getenv("DATABASE_URL", ""),
+        sqs_queue_url=os.getenv("SQS_QUEUE_URL", ""),
+        aws_region=os.getenv("AWS_REGION", "us-east-1"),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        aws_endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
+        llm_provider=os.getenv("LLM_PROVIDER", "anthropic"),
+        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
+        api_host=os.getenv("API_HOST", "0.0.0.0"),
+        api_port=int(os.getenv("API_PORT", "8000")),
+        sqs_poll_interval_seconds=int(os.getenv("SQS_POLL_INTERVAL_SECONDS", "20")),
+        sqs_batch_size=int(os.getenv("SQS_BATCH_SIZE", "10")),
+        sqs_visibility_timeout=int(os.getenv("SQS_VISIBILITY_TIMEOUT", "300")),
+        sqs_max_retries=int(os.getenv("SQS_MAX_RETRIES", "3")),
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        environment=os.getenv("ENVIRONMENT", "production")
+    )
 
 
 # Create a global settings instance

@@ -1,0 +1,86 @@
+"""LLM factory for creating configurable LLM instances."""
+
+import logging
+from typing import Optional
+
+from llama_index.core.llms import LLM
+from llama_index.llms.anthropic import Anthropic
+from llama_index.llms.gemini import Gemini
+from llama_index.llms.openai import OpenAI
+
+from src.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class LLMFactory:
+    """Factory for creating LLM instances based on configuration."""
+
+    @staticmethod
+    def create_llm(
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None
+    ) -> LLM:
+        """
+        Create an LLM instance based on provider configuration.
+
+        Args:
+            provider: LLM provider name (defaults to settings)
+            api_key: API key (defaults to settings)
+
+        Returns:
+            LLM instance
+
+        Raises:
+            ValueError: If provider is not supported or API key is missing
+        """
+        provider = provider or settings.llm_provider
+
+        if provider == "anthropic":
+            api_key = api_key or settings.anthropic_api_key
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY is required for Anthropic provider")
+            logger.info("Creating Anthropic LLM instance")
+            return Anthropic(
+                model="claude-3-5-sonnet-20241022",
+                api_key=api_key,
+                temperature=0.1,
+                max_tokens=2048
+            )
+
+        elif provider == "gemini":
+            api_key = api_key or settings.gemini_api_key
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is required for Gemini provider")
+            logger.info("Creating Gemini LLM instance")
+            return Gemini(
+                model="gemini-1.5-pro",
+                api_key=api_key,
+                temperature=0.1
+            )
+
+        elif provider == "openai":
+            api_key = api_key or settings.openai_api_key
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY is required for OpenAI provider")
+            logger.info("Creating OpenAI LLM instance")
+            return OpenAI(
+                model="gpt-4o",
+                api_key=api_key,
+                temperature=0.1
+            )
+
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+
+
+# Global LLM instance
+_llm_instance: Optional[LLM] = None
+
+
+def get_llm() -> LLM:
+    """Get or create the global LLM instance."""
+    global _llm_instance
+    if _llm_instance is None:
+        _llm_instance = LLMFactory.create_llm()
+    return _llm_instance

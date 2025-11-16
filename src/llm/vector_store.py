@@ -44,13 +44,23 @@ class VectorStoreService:
         # Parse the database URL for SQLAlchemy
         db_url = make_url(settings.database_url)
 
+        # Extract username and password (might be in query params for some providers like Neon)
+        username = db_url.username
+        password = db_url.password
+
+        # If not in standard location, check query parameters
+        if not username and db_url.query.get('user'):
+            username = db_url.query['user']
+        if not password and db_url.query.get('password'):
+            password = db_url.query['password']
+
         # Create PGVector store
         self.vector_store = PGVectorStore.from_params(
             database=db_url.database,
             host=db_url.host,
-            password=db_url.password,
+            password=password,
             port=db_url.port,
-            user=db_url.username,
+            user=username,
             table_name="events",
             embed_dim=384,
             hybrid_search=False,

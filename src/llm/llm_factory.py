@@ -83,6 +83,28 @@ class LLMFactory:
                 max_tokens=2048
             )
 
+        elif provider == "openrouter":
+            api_key = api_key or settings.openrouter_api_key
+            if not api_key:
+                raise ValueError("OPENROUTER_API_KEY is required for OpenRouter provider")
+
+            # Use gpt-3.5-turbo as the model - it's cheaper and OpenRouter supports it
+            # OpenRouter will route to their gpt-3.5-turbo provider using your free credits
+            model = "gpt-3.5-turbo"
+            logger.info(f"Creating OpenRouter LLM instance (using {model})")
+
+            # OpenRouter is OpenAI-compatible
+            llm = OpenAI(
+                model=model,
+                api_key=api_key,
+                api_base="https://openrouter.ai/api/v1",
+                temperature=0.1,
+                max_tokens=2048
+            )
+
+            logger.info("OpenRouter configured successfully")
+            return llm
+
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
